@@ -1,0 +1,51 @@
+name: CI — Test on PR
+run-name: PR opened by ${{ github.actor }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dbt-test:
+    name: "Build & Test (dev environment)"
+    runs-on: ubuntu-latest
+    environment: prod  # Must match your OIDC service user's subject
+    env:
+      SNOWFLAKE_CLI_FEATURES_ENABLE_DBT: true
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      # SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}      # Only if not using OIDC
+      # SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PAT }}   # Only if not using OIDC
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA: ${{ vars.SNOWFLAKE_SCHEMA }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Snowflake CLI
+        uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - name: Verify connection
+        run: snow connection test -x
+
+      # Deploy a tester object (doesn't overwrite prod)
+      - name: Deploy tester dbt project
+        run: |
+          snow dbt deploy tester_env_vars_template \
+            --source . \
+            --dbt-version 1.11.11 \
+            --default-env dev \
+            -x
+
+      # Build all models + run tests in DAG order
+      - name: Build & test with dev environment
+        run: |
+          snow dbt execute -x tester_env_vars_template build \
+            --env dev

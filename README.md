@@ -1,8 +1,16 @@
 # dbt Environment Variables Template for dbt Projects on Snowflake
 
-A template dbt project demonstrating the `env.yml` feature — SQL-powered environment
-variables that replace `.env` files with a single Git-versioned config, giving each
-engineer isolated schemas and dynamic data windows without an orchestrator.
+A template dbt project demonstrating the `env.yml` feature for dbt Projects on
+Snowflake — SQL-powered environment variables alongside Snowflake secrets support,
+allowing admins to manage per-developer schemas, dynamic runtime values, secrets,
+and CI/CD configurations in one place.
+
+**What this template includes:**
+- `env.yml` with three environments (dev, staging, prod)
+- Per-developer schemas via `CURRENT_USER()`
+- Dynamic data windows (all-time, 7-day, yesterday)
+- Snowflake secrets for private Git package authentication
+- GitHub Actions CI/CD workflows (PR testing + merge deployment)
 
 ## Prerequisites
 
@@ -26,7 +34,29 @@ CREATE OR REPLACE NETWORK RULE dbt_network_rule
 
 CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION dbt_ext_access
   ALLOWED_NETWORK_RULES = (dbt_network_rule)
+  ALLOWED_AUTHENTICATION_SECRETS = all
   ENABLED = TRUE;
+```
+
+### Secrets Setup (for private Git packages)
+
+Each engineer creates a personal Git token (read-only repo access) and stores it as a
+Snowflake secret. The `env.yml` resolves `{{ current_user }}` at runtime to find the
+right secret per developer.
+
+```sql
+-- Per-developer secret (each engineer runs this once)
+CREATE OR REPLACE SECRET my_db.my_schema.KMILLS_DBT_GIT_SECRET
+  TYPE = GENERIC_STRING
+  SECRET_STRING = 'ghp_your_personal_access_token_here';
+
+-- Shared team secret (for CI/CD service accounts)
+CREATE OR REPLACE SECRET my_db.my_schema.DBT_GIT_SECRET
+  TYPE = GENERIC_STRING
+  SECRET_STRING = 'ghp_your_cicd_token_here';
+
+-- Grant READ to the team role
+GRANT READ ON SECRET my_db.my_schema.DBT_GIT_SECRET TO ROLE my_team_role;
 ```
 
 ## How It Works
@@ -64,9 +94,13 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION dbt_ext_access
 
 ```
 ├── dbt_project.yml       # Project configuration
-├── packages.yml          # Package dependencies
+├── packages.yml          # Package dependencies (+ private Git pattern)
 ├── profiles.yml          # Reads env_var() — one file for all environments
-├── env.yml               # ★ Environment variables (dev, staging, prod)
+├── env.yml               # ★ Environment variables + secrets (dev, staging, prod)
+│
+├── .github/workflows/
+│   ├── incoming_pr.yml   # CI: test on pull request (dev environment)
+│   └── pr_merged.yml     # CD: deploy on merge (prod environment)
 │
 ├── models/
 │   ├── sources.yml       # Source table definitions — edit these first
@@ -211,6 +245,44 @@ AS
 
 ALTER TASK nightly_dbt_build RESUME;
 ```
+
+## CI/CD with GitHub Actions
+
+This template includes two workflow files in `.github/workflows/`:
+
+| File | Trigger | What it does |
+|------|---------|---|
+| `incoming_pr.yml` | PR opened/updated → `main` | Deploys a **tester** project object, runs `build` with `--env dev` |
+| `pr_merged.yml` | Push to `main` (after merge) | Deploys the **production** project object with `--env prod` |
+
+### Setup
+
+1. **Create an OIDC service user** in Snowflake (no password needed):
+
+```sql
+CREATE USER IF NOT EXISTS github_actions_service_user
+  TYPE = SERVICE
+  WORKLOAD_IDENTITY = (
+    TYPE = OIDC
+    ISSUER = 'https://token.actions.githubusercontent.com'
+    SUBJECT = 'repo:your-org/dbt-env-vars-template:environment:prod'
+  )
+  DEFAULT_ROLE = ACCOUNTADMIN;
+
+GRANT ROLE ACCOUNTADMIN TO USER github_actions_service_user;
+```
+
+2. **Add GitHub repo secrets and variables:**
+
+| Type | Name | Value |
+|------|------|-------|
+| Secret | `SNOWFLAKE_ACCOUNT` | Your account identifier (e.g. `org-account`) |
+| Variable | `SNOWFLAKE_DATABASE` | Database for the dbt project object |
+| Variable | `SNOWFLAKE_SCHEMA` | Schema for the dbt project object |
+
+3. **Create a GitHub environment** named `prod` in repo Settings → Environments.
+
+That's it — open a PR and the CI workflow runs automatically.
 
 ## Rules to Remember
 

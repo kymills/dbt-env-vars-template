@@ -1,0 +1,53 @@
+name: CD — Deploy on Merge
+run-name: PR from ${{ github.actor }} merged — deploying to prod
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dbt-deploy:
+    name: "Deploy to Production"
+    runs-on: ubuntu-latest
+    environment: prod  # Must match your OIDC service user's subject
+    env:
+      SNOWFLAKE_CLI_FEATURES_ENABLE_DBT: true
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      # SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}      # Only if not using OIDC
+      # SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PAT }}   # Only if not using OIDC
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA: ${{ vars.SNOWFLAKE_SCHEMA }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Snowflake CLI
+        uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - name: Verify connection
+        run: snow connection test -x
+
+      # Deploy the production dbt project object
+      - name: Deploy production dbt project
+        run: |
+          snow dbt deploy env_vars_template \
+            --source . \
+            --default-target prod \
+            --default-env prod \
+            --dbt-version 1.11.11 \
+            --external-access-integration dbt_ext_access \
+            -x
+
+      - name: List deployed projects
+        run: snow dbt list -x
+
+      # Optional: uncomment to set up scheduled execution via Snowflake Tasks
+      # - name: Apply scheduling
+      #   run: snow sql -f schedules.sql -x

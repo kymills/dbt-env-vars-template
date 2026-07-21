@@ -3,8 +3,8 @@ version: 2
 sources:
   - name: raw_data
     description: "Replace with your actual source database and schema"
-    database: my_database
-    schema: raw
+    database: SEMANTIC_VIEWS_DEMO
+    schema: RAW
     tables:
       - name: orders
         description: "Order header table"
