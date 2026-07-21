@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: raw_data
+    description: "Replace with your actual source database and schema"
+    database: my_database
+    schema: raw
+    tables:
+      - name: orders
+        description: "Order header table"
+        columns:
+          - name: order_id
+            tests: [unique, not_null]
+          - name: customer_id
+          - name: order_date
+          - name: total_amount
+
+      - name: customers
+        description: "Customer master table"
+        columns:
+          - name: customer_id
+            tests: [unique, not_null]
+          - name: customer_name
+          - name: segment
+          - name: created_at
